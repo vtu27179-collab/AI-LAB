@@ -1,0 +1,108 @@
+import numpy as np
+
+np.random.seed(42)  # for reproducible example runs
+
+# Given distance matrix (5 cities)
+d = np.array([
+    [0, 10, 12, 11, 14],
+    [10, 0, 13, 15, 8],
+    [12, 13, 0, 9, 14],
+    [11, 15, 9, 0, 16],
+    [14, 8, 14, 16, 0]
+], dtype=float)
+
+iteration = 100
+n_ants = 5
+n_cities = 5
+
+# Parameters
+m = n_ants
+n = n_cities
+e = 0.5         # evaporation rate
+alpha = 1       # pheromone exponent
+beta = 2        # visibility exponent
+
+# Visibility (inverse distance). Set diagonal to 0 to avoid inf.
+visibility = np.zeros_like(d)
+with np.errstate(divide='ignore', invalid='ignore'):
+    visibility = 1.0 / d
+visibility[np.isinf(visibility)] = 0.0
+np.fill_diagonal(visibility, 0.0)
+
+# Initial pheromone matrix (symmetric)
+pheromone = 0.1 * np.ones((n, n))
+
+# Route matrix: each ant's tour (n_cities + 1 to return to start)
+route = np.ones((m, n + 1), dtype=int)
+
+for ite in range(iteration):
+    route[:, 0] = 1  # all ants start at city 1
+
+    for a in range(m):
+        visited = [1]  # starts at city 1 (use 1-based indices in route)
+        for step in range(1, n):
+            cur = visited[-1] - 1  # current city index (0-based)
+
+            # compute combined attractiveness to all cities
+            p_feat = np.power(pheromone[cur, :], alpha)
+            v_feat = np.power(visibility[cur, :], beta)
+            combined = p_feat * v_feat
+
+            # forbid already visited cities by zeroing their probability
+            for vis_city in visited:
+                combined[vis_city - 1] = 0.0
+
+            total = combined.sum()
+
+            if total == 0:
+                # If all combined are zero (rare), pick uniformly among unvisited
+                unvisited = [c for c in range(1, n + 1) if c not in visited]
+                next_city = np.random.choice(unvisited)
+            else:
+                probs = combined / total
+                cum_prob = np.cumsum(probs)
+                r = np.random.random()
+                idx = np.searchsorted(cum_prob, r)
+                next_city = int(idx + 1)  # back to 1-based
+
+            visited.append(next_city)
+
+        # complete tour: return to start (1)
+        visited.append(1)
+        route[a, :] = np.array(visited, dtype=int)
+
+    # Evaluate distances for all ants
+    dist_cost = np.zeros(m)
+    for a in range(m):
+        s = 0.0
+        for j in range(n):
+            i_city = route[a, j] - 1
+            j_city = route[a, j + 1] - 1
+            s += d[i_city, j_city]
+        dist_cost[a] = s
+
+    # Best ant this iteration
+    best_idx = int(np.argmin(dist_cost))
+    best_cost = dist_cost[best_idx]
+    best_route = route[best_idx, :].copy()
+
+    # Pheromone evaporation
+    pheromone = (1 - e) * pheromone
+
+    # Pheromone deposit (add to both directions for symmetric TSP)
+    for a in range(m):
+        if dist_cost[a] == 0:
+            continue
+        deposit = 1.0 / dist_cost[a]
+        for j in range(n):
+            u = route[a, j] - 1
+            v = route[a, j + 1] - 1
+            pheromone[u, v] += deposit
+            pheromone[v, u] += deposit
+
+# Print final results
+print("Route of all ants at the end:")
+print(route)
+print()
+print("Best path found (1-based indices):", best_route.tolist())
+print("Cost of the best path: {:.2f}".format(best_cost))
